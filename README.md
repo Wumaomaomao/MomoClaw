@@ -123,6 +123,8 @@ Project planning and progress are tracked in `docs/DEVELOPMENT.md`.
 
 ## Contributing
 
+欢迎通过 PR 为 MomoClaw 贡献改进。
+
 Contributions are welcome. If you would like to improve MomoClaw, please open
 an issue or pull request with a clear description of the change.
 
