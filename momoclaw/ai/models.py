@@ -40,6 +40,46 @@ _MODELS: dict[str, dict[str, Model]] = {
             max_tokens=8192,
         ),
     },
+    "deepseek": {
+        "deepseek-v4-flash": Model(
+            id="deepseek-v4-flash",
+            name="DeepSeek V4 Flash",
+            api="openai-completions",
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            reasoning=True,
+            input=["text"],
+            context_window=1_000_000,
+            max_tokens=393_216,
+            compat={"thinking_format": "deepseek", "assistant_reasoning_content": True},
+            thinking_level_map={
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+            },
+        ),
+        "deepseek-v4-pro": Model(
+            id="deepseek-v4-pro",
+            name="DeepSeek V4 Pro",
+            api="openai-completions",
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            reasoning=True,
+            input=["text"],
+            context_window=1_000_000,
+            max_tokens=393_216,
+            compat={"thinking_format": "deepseek", "assistant_reasoning_content": True},
+            thinking_level_map={
+                "minimal": "high",
+                "low": "high",
+                "medium": "high",
+                "high": "high",
+                "xhigh": "max",
+            },
+        ),
+    },
 }
 
 
@@ -60,4 +100,3 @@ def get_models(provider: str) -> list[Model]:
 
 def get_providers() -> list[str]:
     return list(_MODELS.keys())
-

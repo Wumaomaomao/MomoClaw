@@ -1,0 +1,328 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any
+
+from momoclaw.ai.models import get_model, get_models, get_providers
+from momoclaw.ai.types import AssistantMessage, TextContent
+from momoclaw.coding_agent import CreateAgentSessionOptions, create_agent_session
+from momoclaw.coding_agent.session import AgentSession
+
+DEFAULT_PROVIDER = "deepseek"
+DEFAULT_MODEL_ID = "deepseek-v4-pro"
+
+
+@dataclass
+class CliConfig:
+    provider: str = DEFAULT_PROVIDER
+    model_id: str = DEFAULT_MODEL_ID
+    base_url: str | None = None
+    read_only_mode: bool = True
+
+
+class MomoClawCli:
+    def __init__(
+        self,
+        *,
+        workspace_dir: str | Path,
+        provider: str | None = None,
+        model_id: str | None = None,
+        base_url: str | None = None,
+        read_only_mode: bool = True,
+        session_id: str | None = None,
+    ) -> None:
+        self.workspace_dir = Path(workspace_dir).resolve()
+        self.config_path = self.workspace_dir / ".momoclaw" / "config.json"
+        self.config = self._load_config()
+        if provider:
+            self.config.provider = provider
+        if model_id:
+            self.config.model_id = model_id
+        if base_url is not None:
+            self.config.base_url = base_url or None
+        self.config.read_only_mode = read_only_mode
+        self.session_id = session_id
+        self.session: AgentSession | None = None
+        self._printed_stream_text = False
+
+    def start_session(self) -> AgentSession:
+        self._save_config()
+        if self.session is not None:
+            self.session.close()
+        self.session = create_agent_session(
+            CreateAgentSessionOptions(
+                workspace_dir=self.workspace_dir,
+                model=self._resolve_model(),
+                provider=self.config.provider,
+                model_id=self.config.model_id,
+                session_id=self.session_id,
+                read_only_mode=self.config.read_only_mode,
+            )
+        )
+        self.session_id = self.session.session_id
+        self.session.subscribe(self._on_event)
+        return self.session
+
+    async def run(self) -> None:
+        self.start_session()
+        print("MomoClaw CLI. Type /help for commands.")
+        print(self._model_text(prefix="Model"))
+        while True:
+            try:
+                raw = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not raw:
+                continue
+            if raw.startswith("/"):
+                should_continue = await self.handle_command(raw)
+                if not should_continue:
+                    break
+                continue
+            await self.prompt(raw)
+        if self.session is not None:
+            self.session.close()
+
+    async def prompt(self, text: str) -> None:
+        session = self.session or self.start_session()
+        self._printed_stream_text = False
+        messages = await session.prompt(text)
+        last = messages[-1] if messages else None
+        if isinstance(last, AssistantMessage) and last.stop_reason == "error":
+            print(f"[error] {last.error_message or 'unknown error'}")
+        elif isinstance(last, AssistantMessage) and not self._printed_stream_text:
+            print(_assistant_text(last))
+        elif self._printed_stream_text:
+            print()
+
+    async def handle_command(self, raw: str) -> bool:
+        parts = raw.split()
+        command = parts[0].lower()
+        args = parts[1:]
+        if command in {"/exit", "/quit"}:
+            print("bye")
+            return False
+        if command == "/help":
+            print(help_text())
+            return True
+        if command == "/model":
+            print(self._handle_model(args))
+            return True
+        if command == "/new":
+            self.session_id = None
+            self.start_session()
+            print(f"Started new session: {self.session_id}")
+            return True
+        if command == "/clear":
+            if self.session is not None:
+                self.session.agent.set_messages([])
+            print("Cleared in-memory messages for the current session.")
+            return True
+        if command == "/usage":
+            print(self._usage_text())
+            return True
+        if command == "/tools":
+            print(self._tools_text())
+            return True
+        print(f"Unknown command: {command}. Type /help.")
+        return True
+
+    def _handle_model(self, args: list[str]) -> str:
+        if not args or args[0] in {"current", "show"}:
+            return self._model_text(prefix="Current model")
+        if args[0] == "list":
+            lines: list[str] = []
+            for provider in get_providers():
+                models = ", ".join(f"{model.id} ({model.base_url})" for model in get_models(provider))
+                lines.append(f"{provider}: {models}")
+            return "\n".join(lines)
+        if args[0] == "set":
+            if len(args) not in {3, 4}:
+                return "Usage: /model set <provider> <model_id> [base_url]"
+            provider, model_id = args[1], args[2]
+            base_url = args[3] if len(args) == 4 else None
+            try:
+                get_model(provider, model_id)
+            except KeyError as exc:
+                return str(exc)
+            self.config.provider = provider
+            self.config.model_id = model_id
+            self.config.base_url = base_url
+            self.session_id = None
+            self.start_session()
+            return f"{self._model_text(prefix='Model set to')}. Started session: {self.session_id}"
+        if args[0] == "base-url":
+            if len(args) != 2:
+                return "Usage: /model base-url <base_url|default>"
+            self.config.base_url = None if args[1] == "default" else args[1]
+            self.session_id = None
+            self.start_session()
+            return f"{self._model_text(prefix='Base URL updated for')}. Started session: {self.session_id}"
+        return "Usage: /model [current|list|set <provider> <model_id> [base_url]|base-url <base_url|default>]"
+
+    def _usage_text(self) -> str:
+        if self.session is None or self.session.last_usage is None:
+            return "No usage yet."
+        usage = self.session.last_usage
+        return (
+            f"Last usage: input={usage['input_tokens']} "
+            f"output={usage['output_tokens']} total={usage['total_tokens']}"
+        )
+
+    def _tools_text(self) -> str:
+        if self.session is None:
+            return "No session."
+        names = [tool.name for tool in self.session.agent.state.tools]
+        return "Tools: " + (", ".join(names) if names else "(none)")
+
+    def _resolve_model(self):
+        model = get_model(self.config.provider, self.config.model_id)
+        if self.config.base_url:
+            return replace(model, base_url=self.config.base_url)
+        return model
+
+    def _model_text(self, *, prefix: str) -> str:
+        base = f"{prefix}: {self.config.provider}/{self.config.model_id}"
+        model = self._resolve_model()
+        return f"{base} base_url={model.base_url}"
+
+    def _on_event(self, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        if event_type == "tool_execution_start":
+            name = event.get("toolName", "unknown")
+            args = event.get("args", {})
+            print(f"\n[tool] {name} {self._format_tool_args(name, args)}")
+            return
+        if event_type == "tool_execution_end":
+            name = event.get("toolName", "unknown")
+            result = event.get("result")
+            is_error = bool(event.get("isError"))
+            summary = self._format_tool_result(result)
+            status = "error" if is_error else "ok"
+            print(f"[tool:{status}] {name}{summary}")
+            return
+        if event_type != "message_update":
+            return
+        assistant_event = event.get("assistantMessageEvent")
+        if not isinstance(assistant_event, dict):
+            return
+        if assistant_event.get("type") == "text_delta":
+            print(str(assistant_event.get("delta", "")), end="", flush=True)
+            self._printed_stream_text = True
+
+    def _format_tool_args(self, name: Any, args: Any) -> str:
+        if not isinstance(args, dict):
+            return ""
+        if name in {"read", "write", "edit"} and isinstance(args.get("path"), str):
+            return args["path"]
+        if name == "bash" and isinstance(args.get("command"), str):
+            command = args["command"].replace("\n", "\\n")
+            return command if len(command) <= 120 else command[:117] + "..."
+        return json.dumps(args, ensure_ascii=False)[:160]
+
+    def _format_tool_result(self, result: Any) -> str:
+        details = getattr(result, "details", None)
+        if isinstance(details, dict):
+            if "bytes" in details:
+                return f" ({details['bytes']} bytes)"
+            if "exit_code" in details:
+                return f" (exit={details['exit_code']})"
+            if "diff" in details:
+                diff_lines = str(details["diff"]).splitlines()
+                changed = sum(1 for line in diff_lines if line.startswith(("+", "-")) and not line.startswith(("+++", "---")))
+                return f" ({changed} changed lines)"
+            if "kind" in details and "path" in details:
+                return f" ({details['kind']})"
+        return ""
+
+    def _load_config(self) -> CliConfig:
+        if not self.config_path.exists():
+            return CliConfig()
+        try:
+            raw = json.loads(self.config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return CliConfig()
+        if not isinstance(raw, dict):
+            return CliConfig()
+        return CliConfig(
+            provider=str(raw.get("provider", DEFAULT_PROVIDER)),
+            model_id=str(raw.get("model_id", DEFAULT_MODEL_ID)),
+            base_url=str(raw["base_url"]) if raw.get("base_url") else None,
+            read_only_mode=bool(raw.get("read_only_mode", True)),
+        )
+
+    def _save_config(self) -> None:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(
+            json.dumps(
+                {
+                    "provider": self.config.provider,
+                    "model_id": self.config.model_id,
+                    "base_url": self.config.base_url,
+                    "read_only_mode": self.config.read_only_mode,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+
+def help_text() -> str:
+    return "\n".join(
+        [
+            "Commands:",
+            "  /help                         Show this help.",
+            "  /model                        Show current provider/model.",
+            "  /model list                   List built-in providers, models, and default base URLs.",
+            "  /model set <provider> <id> [base_url]",
+            "                                Save model config and start a new session.",
+            "  /model base-url <url|default> Override or reset base URL for current model.",
+            "  /tools                        Show enabled tools.",
+            "  /new                          Start a new session with current model.",
+            "  /usage                        Show last model usage.",
+            "  /clear                        Clear current in-memory conversation.",
+            "  /exit                         Exit the CLI.",
+        ]
+    )
+
+
+def _assistant_text(message: AssistantMessage) -> str:
+    return "".join(block.text for block in message.content if isinstance(block, TextContent))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="momoclaw", description="MomoClaw interactive coding-agent CLI")
+    parser.add_argument("--workspace", default=".", help="Workspace directory. Defaults to current directory.")
+    parser.add_argument("--provider", help="Provider name, for example openai or anthropic.")
+    parser.add_argument("--model", dest="model_id", help="Model id for the selected provider.")
+    parser.add_argument("--base-url", help="Override the configured model base URL.")
+    parser.add_argument("--session", dest="session_id", help="Existing session id to resume.")
+    parser.add_argument("--read-write", action="store_true", help="Enable non-read-only MVP tools such as bash.")
+    return parser
+
+
+async def async_main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    cli = MomoClawCli(
+        workspace_dir=args.workspace,
+        provider=args.provider,
+        model_id=args.model_id,
+        base_url=args.base_url,
+        read_only_mode=not args.read_write,
+        session_id=args.session_id,
+    )
+    await cli.run()
+
+
+def main(argv: list[str] | None = None) -> None:
+    asyncio.run(async_main(argv))
+
+
+if __name__ == "__main__":
+    main()

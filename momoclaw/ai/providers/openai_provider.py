@@ -51,7 +51,7 @@ def stream_openai(
 
             payload: dict[str, Any] = {
                 "model": model.id,
-                "messages": to_openai_messages(context),
+                "messages": to_openai_messages(context, model),
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
@@ -64,6 +64,7 @@ def stream_openai(
                 payload["tools"] = tools
             if resolved.metadata:
                 payload["metadata"] = resolved.metadata
+            _apply_openai_compat_options(payload, model, resolved)
 
             payload = await apply_payload_hook(payload, model, resolved.on_payload)
             response = await client.chat.completions.create(**payload)
@@ -164,3 +165,16 @@ def stream_simple_openai(
 ) -> AssistantMessageEventStream:
     return stream_openai(model, context, options)
 
+
+def _apply_openai_compat_options(payload: dict[str, Any], model: Model, options: StreamOptions) -> None:
+    if not model.compat or model.compat.get("thinking_format") != "deepseek":
+        return
+
+    reasoning = options.reasoning if isinstance(options, SimpleStreamOptions) else None
+    if reasoning:
+        effort = model.thinking_level_map.get(reasoning, reasoning) if model.thinking_level_map else reasoning
+        payload["reasoning_effort"] = effort
+        payload["extra_body"] = {"thinking": {"type": "enabled"}}
+        payload.pop("temperature", None)
+    else:
+        payload["extra_body"] = {"thinking": {"type": "disabled"}}

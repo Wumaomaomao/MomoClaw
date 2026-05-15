@@ -173,6 +173,20 @@ Current MVP providers:
 - `openai-completions`: official `openai` Python SDK, Chat Completions streaming.
 - `anthropic-messages`: official `anthropic` Python SDK, Messages API streaming.
 
+Built-in provider/model entries:
+
+- `openai/gpt-4.1`
+- `openai/gpt-4.1-mini`
+- `anthropic/claude-sonnet-4-5`
+- `deepseek/deepseek-v4-flash`
+- `deepseek/deepseek-v4-pro`
+
+DeepSeek uses the OpenAI-compatible provider with `base_url=https://api.deepseek.com`
+and reads `DEEPSEEK_API_KEY`. DeepSeek thinking mode is disabled by default in
+MomoClaw requests; when `SimpleStreamOptions.reasoning` is set, the provider
+sends DeepSeek's `extra_body={"thinking": {"type": "enabled"}}` and maps
+`xhigh` to `reasoning_effort=max`, other levels to `high`.
+
 Supported MVP features:
 
 - text streaming

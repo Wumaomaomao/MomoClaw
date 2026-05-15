@@ -40,6 +40,8 @@ Current implementation:
 
 - `openai-completions` provider using the official `openai` SDK.
 - `anthropic-messages` provider using the official `anthropic` SDK.
+- `deepseek` built-in models using the OpenAI-compatible provider and
+  `DEEPSEEK_API_KEY`.
 - Shared `Context`, `Message`, `Tool`, `Model`, `Usage`, and stream option
   dataclasses.
 - Async `AssistantMessageEventStream`.
@@ -58,7 +60,25 @@ Responsibility:
 - Execute tool calls and append `ToolResultMessage` results.
 - Emit stable runtime events for UI/CLI/IM consumers.
 
-Expected MVP modules:
+Current implementation:
+
+- `types.py`: `AgentTool`, `AgentToolResult`, `AgentContext`,
+  `AgentLoopConfig`, hook and event types.
+- `loop.py`: sequential model/tool loop with stream event forwarding.
+- `agent.py`: stateful wrapper with `prompt`, `prompt_messages`,
+  `continue_run`, `subscribe`, and `set_messages`.
+- Unit tests for text responses, tool-call continuation, and invalid tool
+  arguments.
+
+Reference doc: `momoclaw/agent/README.md`.
+
+Remaining work:
+
+- Add cancellation/signal support at the provider boundary.
+- Add richer event metadata if UI/IM layers need run IDs or turn IDs.
+- Add optional parallel tool execution after sequential behavior is stable.
+
+Original MVP modules:
 
 - `types.py`: `AgentTool`, `AgentToolResult`, `AgentContext`,
   `AgentLoopConfig`, event types.
@@ -82,7 +102,26 @@ Responsibility:
 - Manage workspace resources, system prompt, tools, persistence, and retries.
 - Provide a stable API for CLI and IM layers.
 
-Expected MVP modules:
+Current implementation:
+
+- `session.py`: long-lived `AgentSession` wrapper around agent core.
+- `session_store.py`: file-backed metadata, message log, and event log.
+- `builtin_tools.py`: built-in `read`, `write`, `edit`, and `bash` tools.
+- `factory.py`: create a session from workspace/model/tool options.
+- `system_prompt.py`: basic coding-agent system prompt assembly.
+- Unit tests for read/write/edit/bash behavior, tool-driven file reading,
+  persistence reload, and read-only/read-write factory defaults.
+
+Reference doc: `momoclaw/coding_agent/README.md`.
+
+Remaining work:
+
+- Add retry policy around failed agent turns.
+- Add context compaction.
+- Add workspace resource loading and richer project prompt files.
+- Decide how much bash should be exposed in IM mode.
+
+Original MVP modules:
 
 - `session.py`: long-lived session object.
 - `session_store.py`: JSONL or simple file-backed message persistence.
@@ -108,7 +147,34 @@ Responsibility:
 - Queue messages per channel to avoid concurrent mutation of a session.
 - Send or update replies through platform adapters.
 
-Expected MVP modules:
+Current implementation:
+
+- `types.py`: `IMIncomingMessage`, `IMOutgoingText`, `IMAdapter` protocol.
+- `session_router.py`: persistent map from `platform/channel/thread` to coding
+  agent session IDs under `.momoclaw/im/session_map.json`.
+- `service.py`: dedup, stale event skip, per-channel queue, command handling,
+  session prompting, reply formatting, and idle eviction.
+- `adapters/fake.py`: in-memory adapter used by tests.
+- `adapters/feishu.py`: Feishu URL verification, text message parsing, mention
+  stripping, text/card replies, card updates, and metadata caches.
+- `adapters/feishu_longconn.py`: optional `lark-oapi` long connection receiver.
+- `feishu_longconn_cli.py`: `momoclaw-feishu-longconn` command for local
+  Feishu long-connection runs.
+- Unit tests for service replies, dedup, webhook routing, command session
+  rotation, stale-event skipping, session routing, and Feishu parsing.
+
+Reference doc: `momoclaw/im/README.md`.
+
+Remaining work:
+
+- Add an ASGI/FastAPI server entrypoint for Feishu webhook deployment.
+- Wire optional card/streaming updates into `IMService` after the plain text
+  path is deployed.
+- Add IM-specific memory loading if channel-level context becomes necessary.
+- Decide whether IM mode should expose write/edit/bash or stay read-only by
+  default.
+
+Original MVP modules:
 
 - `types.py`: `IMIncomingMessage`, `IMOutgoingText`, `IMAdapter` protocol.
 - `session_router.py`: map `platform/channel/thread` to session IDs.
@@ -129,6 +195,16 @@ Responsibility:
 
 - Expose local development workflows.
 - Provide simple smoke-test commands before full IM integration exists.
+
+Current implementation:
+
+- `momoclaw.cli` interactive loop.
+- `momoclaw` console script.
+- Default CLI model: `deepseek/deepseek-v4-pro`.
+- `/help`, `/model`, `/model list`, `/model set`, `/model base-url`, `/tools`,
+  `/usage`, `/new`, `/clear`, `/exit`.
+- Workspace config stored at `.momoclaw/config.json`.
+- Unit tests for command handling and model config persistence.
 
 Expected MVP commands:
 
@@ -189,12 +265,13 @@ Status values:
 | Provider registry | Done | Built-in provider auto-registration and mismatch checks are covered. |
 | OpenAI provider | In Progress | SDK provider implemented; no live API test yet. |
 | Anthropic provider | In Progress | SDK provider implemented; no live API test yet. |
+| DeepSeek models | In Progress | `deepseek-v4-flash` and `deepseek-v4-pro` are configured via OpenAI-compatible API; no live API test yet. |
 | AI documentation | Done | See `momoclaw/ai/README.md`. |
-| Agent core | Planned | Next major implementation phase. |
-| Coding agent session | Planned | Depends on agent core. |
-| Built-in coding tools | Planned | Start with read-only tools. |
-| IM service | Planned | Depends on coding agent session. |
-| CLI entrypoints | Planned | Useful after AI layer and basic agent loop are stable. |
+| Agent core | In Progress | MVP loop implemented and tested; cancellation/event metadata still pending. |
+| Coding agent session | In Progress | MVP session, persistence, factory, and prompt assembly are implemented. |
+| Built-in coding tools | In Progress | `read`, `write`, `edit`, and `bash` implemented; bash/edit safety hardening may continue. |
+| IM service | Done | MVP service, fake adapter, Feishu adapter skeleton, docs, and tests are implemented. |
+| CLI entrypoints | Done | Interactive CLI and model configuration commands are implemented and tested. |
 
 ## Immediate Roadmap
 
@@ -209,27 +286,42 @@ Status values:
 
 ### Phase 2: Agent Core MVP
 
-- Implement `AgentTool` and tool result types.
-- Implement one-turn prompt flow with text-only response.
-- Implement tool-call loop.
-- Add event subscription.
-- Add tests with a fake stream provider.
+- Done: implement `AgentTool` and tool result types.
+- Done: implement one-turn prompt flow with text-only response.
+- Done: implement tool-call loop.
+- Done: add event subscription.
+- Done: add tests with a fake stream provider.
+- Pending: add cancellation behavior and richer event metadata if required by
+  coding-agent or IM layers.
 
 ### Phase 3: Coding Agent MVP
 
-- Implement session object around agent core.
-- Add session persistence.
-- Add read-only file tools.
-- Add basic system prompt.
-- Add retry behavior around failed turns.
+- Done: implement session object around agent core.
+- Done: add session persistence.
+- Done: add read-only file tools.
+- Done: add basic system prompt.
+- Pending: add retry behavior around failed turns.
+- Done: add write/edit/bash tools behind read-write mode.
+- Pending: harden bash/edit safety policy as real workflows emerge.
 
 ### Phase 4: IM MVP
 
-- Implement normalized IM types and local fake adapter.
-- Implement per-channel queue and session routing.
-- Add plain reply mode.
-- Add optional streaming update mode.
-- Add platform adapter after local service tests pass.
+- Done: implement normalized IM types and local fake adapter.
+- Done: implement per-channel queue and session routing.
+- Done: add plain reply mode.
+- Done: add Feishu adapter skeleton after local service tests pass.
+- Pending: add ASGI/FastAPI webhook server.
+- Pending: add optional streaming/card update mode.
+
+### Phase 5: CLI MVP
+
+- Done: add interactive CLI entrypoint.
+- Done: add `/help`.
+- Done: add `/model` current/list/set/base-url commands.
+- Done: add `/tools`, `/usage`, `/new`, `/clear`, and `/exit`.
+- Done: show compact tool call/result summaries during CLI runs.
+- Done: persist model config under `.momoclaw/config.json`.
+- Pending: add non-interactive one-shot prompt mode if needed for scripts.
 
 ## Testing Policy
 

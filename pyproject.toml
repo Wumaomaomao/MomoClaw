@@ -9,11 +9,26 @@ dependencies = [
     "openai>=2.0.0",
 ]
 
+[project.scripts]
+momoclaw = "momoclaw.cli:main"
+momoclaw-feishu-longconn = "momoclaw.im.feishu_longconn_cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
 ]
+feishu = [
+    "lark-oapi>=1.4.22",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.uv]
+package = true
+
+[tool.uv.workspace]
+members = [
+    "home/wyc/MomoClaw/helloworld",
+]

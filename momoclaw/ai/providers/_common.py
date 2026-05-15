@@ -12,6 +12,7 @@ from ..types import (
     Message,
     Model,
     TextContent,
+    ThinkingContent,
     Tool,
     ToolCall,
     ToolResultMessage,
@@ -55,7 +56,7 @@ def empty_assistant_message(api: str, provider: str, model: str) -> AssistantMes
     return AssistantMessage(api=api, provider=provider, model=model, usage=Usage(), timestamp=now_ms())
 
 
-def to_openai_messages(context: Context) -> list[dict[str, Any]]:
+def to_openai_messages(context: Context, model: Model | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if context.system_prompt:
         out.append({"role": "system", "content": context.system_prompt})
@@ -63,7 +64,7 @@ def to_openai_messages(context: Context) -> list[dict[str, Any]]:
         if isinstance(msg, UserMessage):
             out.append({"role": "user", "content": _to_openai_user_content(msg.content)})
         elif isinstance(msg, AssistantMessage):
-            out.append(_to_openai_assistant_message(msg))
+            out.append(_to_openai_assistant_message(msg, model))
         elif isinstance(msg, ToolResultMessage):
             out.append(
                 {
@@ -87,10 +88,13 @@ def _to_openai_user_content(content: str | list[TextContent | ImageContent]) -> 
     return parts
 
 
-def _to_openai_assistant_message(msg: AssistantMessage) -> dict[str, Any]:
+def _to_openai_assistant_message(msg: AssistantMessage, model: Model | None = None) -> dict[str, Any]:
     text = "".join(block.text for block in msg.content if isinstance(block, TextContent))
+    thinking = "".join(block.thinking for block in msg.content if isinstance(block, ThinkingContent))
     tool_calls = [block for block in msg.content if isinstance(block, ToolCall)]
     payload: dict[str, Any] = {"role": "assistant", "content": text or None}
+    if thinking and model is not None and model.compat and model.compat.get("assistant_reasoning_content"):
+        payload["reasoning_content"] = thinking
     if tool_calls:
         payload["tool_calls"] = [
             {
@@ -171,4 +175,3 @@ def to_anthropic_tools(tools: list[Tool] | None) -> list[dict[str, Any]] | None:
 
 def _join_text(msg: ToolResultMessage) -> str:
     return "\n".join(part.text for part in msg.content if isinstance(part, TextContent))
-
