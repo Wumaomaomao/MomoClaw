@@ -13,6 +13,10 @@ dependencies = [
 momoclaw = "momoclaw.cli:main"
 momoclaw-feishu-longconn = "momoclaw.im.feishu_longconn_cli:main"
 
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.0",
@@ -27,6 +31,13 @@ pythonpath = ["."]
 
 [tool.uv]
 package = true
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["momoclaw*"]
+exclude = ["home*", "tests*"]
 
 [tool.uv.workspace]
 members = [

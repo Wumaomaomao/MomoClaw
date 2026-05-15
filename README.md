@@ -1,7 +1,65 @@
-# MomoClaw
+# MomoClaw - A persenal ai coding asssisant
 
-MomoClaw is a Python coding-agent project with a unified AI provider layer,
+<img src="docs/images/momo.png" alt="MomoClaw" width="48" style="vertical-align: middle;"> **MomoClaw** is a Python coding-agent project with a unified AI provider layer,
 agent loop, coding-agent session wrapper, IM bridge, and an MVP interactive CLI.
+
+```
+$ uv run momoclaw
+MomoClaw CLI. Type /help for commands.
+Model: deepseek/deepseek-v4-pro base_url=https://api.deepseek.com
+
+> 你好
+你好！我是 MomoClaw，你的编程助手。有什么我可以帮你的吗？
+
+> 请告诉我 MomoClaw 的核心模块有几大部分？
+让我先探索一下 MomoClaw 项目的结构，了解其核心模块。
+
+  [tool] read /home/<user>/MomoClaw
+    [ok] directory
+  [tool] read /home/<user>/MomoClaw/momoclaw
+    [ok] directory
+  [tool] read /home/<user>/MomoClaw/pyproject.toml
+    [ok] file
+  [tool] read /home/<user>/MomoClaw/momoclaw/agent
+    [ok] directory
+  [tool] read /home/<user>/MomoClaw/momoclaw/ai
+    [ok] directory
+  [tool] read /home/<user>/MomoClaw/momoclaw/coding_agent
+    [ok] directory
+  [tool] read /home/<user>/MomoClaw/momoclaw/im
+    [ok] directory
+
+现在让我查看各模块的 README 和核心文件，以更深入了解每个模块的职责。
+
+  [tool] read /home/<user>/MomoClaw/momoclaw/agent/README.md
+    [ok] file
+  [tool] read /home/<user>/MomoClaw/momoclaw/ai/README.md
+    [ok] file
+  [tool] read /home/<user>/MomoClaw/momoclaw/coding_agent/README.md
+    [ok] file
+  [tool] read /home/<user>/MomoClaw/momoclaw/im/README.md
+    [ok] file
+
+让我为您总结：
+
+## MomoClaw 核心模块 — 4 大部分
+
+1. momoclaw.ai — AI 层（AI Provider 抽象层）
+   - 屏蔽不同 AI 厂商 API 协议差异
+   - 提供统一消息模型、流事件协议和调度 API
+
+2. momoclaw.agent — Agent 核心循环层
+   - 执行用户输入 → 调用 AI → 执行工具 → 循环
+   - 管理工具执行和事件广播
+
+3. momoclaw.coding_agent — 编码 Agent 应用层
+   - 提供编码专用 prompt、工作区工具和会话持久化
+   - 内置工具：read、write、edit、bash
+
+4. momoclaw.im — IM 即时通讯桥接层
+   - 将飞书等 IM 平台事件桥接到 coding-agent 会话
+   - 提供会话路由、服务编排和控制命令
+```
 
 ## Run The CLI
 
@@ -81,6 +139,8 @@ Current IM control commands:
 Reference doc: `momoclaw/im/README.md`.
 
 ### Feishu Long Connection
+
+![](docs/images/image.png)
 
 Install the optional Feishu long-connection dependency:
 
