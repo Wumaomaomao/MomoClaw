@@ -121,6 +121,20 @@ uv run pytest tests
 
 Project planning and progress are tracked in `docs/DEVELOPMENT.md`.
 
+## Contributing
+
+Contributions are welcome. If you would like to improve MomoClaw, please open
+an issue or pull request with a clear description of the change.
+
+Before submitting a pull request, run the test suite:
+
+```bash
+uv run pytest tests
+```
+
+For larger changes, please discuss the approach first so the implementation can
+fit the project's current architecture and roadmap.
+
 ## IM MVP
 
 The IM bridge lives under `momoclaw/im/`. It includes normalized IM message
@@ -167,3 +181,7 @@ uv run --extra feishu momoclaw-feishu-longconn --metadata
 uv run --extra feishu momoclaw-feishu-longconn --provider openai --model gpt-4.1-mini
 uv run --extra feishu momoclaw-feishu-longconn --base-url https://gateway.example/v1
 ```
+
+## License
+
+MomoClaw is licensed under the MIT License. See [LICENSE](LICENSE) for details.

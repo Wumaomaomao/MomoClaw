@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
 dependencies = [
     "anthropic>=0.72.0",
     "openai>=2.0.0",
