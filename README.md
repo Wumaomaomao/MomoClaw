@@ -1,4 +1,4 @@
-# MomoClaw - A persenal ai coding asssisant
+# MomoClaw - My Personal AI Coding Assistant
 
 <img src="docs/images/momo.png" alt="MomoClaw" width="48" style="vertical-align: middle;"> **MomoClaw** is a Python coding-agent project with a unified AI provider layer,
 agent loop, coding-agent session wrapper, IM bridge, and an MVP interactive CLI.
