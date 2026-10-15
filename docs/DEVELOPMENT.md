@@ -109,7 +109,8 @@ Current implementation:
 - `builtin_tools.py`: built-in `read`, `write`, `edit`, and `bash` tools.
 - `factory.py`: create a session from workspace/model/tool options.
 - `system_prompt.py`: basic coding-agent system prompt assembly.
-- `memory/`: opt-in local workspace memory with bounded scanning, source-hash validation, lexical retrieval, and token-limited prompt context.
+- `memory/`: opt-in local workspace memory with bounded scanning, source-hash validation, lexical retrieval, and token-limited request context.
+- `context/`: fixed system prompts, per-request budgeting, deterministic request-view compaction, structured checkpoints, and restart recovery.
 - Unit tests for read/write/edit/bash behavior, tool-driven file reading,
   persistence reload, and read-only/read-write factory defaults.
 
@@ -118,9 +119,10 @@ Reference doc: `momoclaw/coding_agent/README.md`.
 Remaining work:
 
 - Add retry policy around failed agent turns.
-- Add context compaction. See [the context management plan](CONTEXT_COMPACTION_PLAN.md).
+- Add model-generated semantic summaries and provider-specific context-overflow retry after evaluation.
+- Add multi-process session writer locking and calibrate token estimates with provider usage.
 - Add workspace resource loading and richer project prompt files.
-- Workspace memory MVP is implemented for local CLI/session use; task-trace extraction, automatic candidate generation, and IM integration remain future work.
+- Workspace memory task-trace extraction, automatic candidate generation, and IM integration remain future work.
 - Decide how much bash should be exposed in IM mode.
 
 Original MVP modules:

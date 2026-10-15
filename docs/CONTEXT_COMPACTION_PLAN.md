@@ -2,7 +2,7 @@
 
 - 版本：v1.0
 - 日期：2026-10-15
-- 状态：待实施设计；本文不代表所述功能已开发完成
+- 状态：初版已实现；本文记录目标设计，未完成项见“实施状态”
 - 适用范围：本地 CLI 与 AgentSession；兼顾后续 IM
 - 核心约束：同一配置周期内，主任务请求的 system prompt 保持逐字节一致
 
@@ -494,4 +494,10 @@ manifest 指向当前已提交检查点。检查点建议字段：
 - 验证 IM 的队列、取消与上下文生命周期后再接入。
 - 只有质量与成本数据支持时才考虑默认开启。
 
-本轮交付仅为设计文档；实施阶段按上述完成条件推进，每阶段报告修改文件、验证证据和未解决问题。
+初版实现已接入 coding-agent 与 CLI。当前可用范围和未完成项列在本文“实施状态”；后续阶段仍按上述完成条件推进，并用真实 provider canary 评估质量、成本与延迟。
+
+## 实施状态（2026-10-15）
+
+当前代码已实现以下部分：固定 session system prompt 并记录 SHA-256；每次 provider 请求前通过 `convert_to_llm` 创建不改写原始消息的请求视图；保守 token 估算、输出预算传递、自动阈值与硬预算；旧完整轮次的结构化原文摘录、近期轮次保护、tool result 请求副本截断；Workspace Memory 和动态技能迁移到带不可信标记的用户消息块；JSONL 新旧格式兼容、逐消息 fsync、原子 checkpoint/manifest、clear 时清除 checkpoint；未完成工具调用的恢复占位结果；记录 provider input usage、估算比率与 cache usage；`/context`、`/compact` 与 CLI `--context`。
+
+目前没有接入模型生成的语义摘要，也没有按供应商错误码执行一次超限重试；字符/JSON 字节估算无法完全等同供应商 tokenizer；未实现多进程 session writer 锁和真实 provider usage 的估算校准。以上需要独立评估和验证后再开启，当前初版通过确定性摘录与明确错误保持可追溯性。

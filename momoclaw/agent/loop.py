@@ -178,10 +178,29 @@ async def _stream_assistant_response(
     stream_fn: StreamFn | None,
 ) -> AssistantMessage:
     del signal
-    llm_messages = await _maybe_await(config.convert_to_llm(context.messages))
+    try:
+        llm_messages = await _maybe_await(config.convert_to_llm(context.messages))
+    except Exception as exc:
+        failed = AssistantMessage(
+            content=[TextContent(text=f"Context preparation failed: {exc}")],
+            api=config.model.api,
+            provider=config.model.provider,
+            model=config.model.id,
+            stop_reason="error",
+            error_message=str(exc),
+            timestamp=_now_ms(),
+        )
+        await _emit(emit, {"type": "message_start", "message": failed})
+        await _emit(emit, {"type": "message_end", "message": failed})
+        return failed
     llm_context = Context(system_prompt=context.system_prompt, messages=llm_messages, tools=_to_ai_tools(context.tools))
     api_key = await _maybe_await(config.get_api_key(config.model.provider)) if config.get_api_key else None
-    options = SimpleStreamOptions(api_key=api_key, reasoning=config.reasoning, session_id=config.session_id)
+    options = SimpleStreamOptions(
+        api_key=api_key,
+        reasoning=config.reasoning,
+        session_id=config.session_id,
+        max_tokens=config.max_output_tokens or min(4096, config.model.max_tokens),
+    )
 
     fn = stream_fn or stream_simple
     response_stream = await _maybe_await(fn(config.model, llm_context, options))

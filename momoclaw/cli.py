@@ -38,6 +38,7 @@ class MomoClawCli:
         session_id: str | None = None,
         skill_names: list[str] | None = None,
         memory_enabled: bool = False,
+        context_enabled: bool = False,
     ) -> None:
         self.workspace_dir = Path(workspace_dir).resolve()
         self.config_path = self.workspace_dir / ".momoclaw" / "config.json"
@@ -52,6 +53,7 @@ class MomoClawCli:
         self.session_id = session_id
         self.skill_names = list(skill_names or [])
         self.memory_enabled = memory_enabled
+        self.context_enabled = context_enabled
         self.session: AgentSession | None = None
         self._printed_stream_text = False
 
@@ -69,6 +71,7 @@ class MomoClawCli:
                 read_only_mode=self.config.read_only_mode,
                 skill_names=self.skill_names,
                 memory_enabled=self.memory_enabled,
+                context_enabled=self.context_enabled,
             )
         )
         self.session_id = self.session.session_id
@@ -128,8 +131,8 @@ class MomoClawCli:
             return True
         if command == "/clear":
             if self.session is not None:
-                self.session.agent.set_messages([])
-            print("Cleared in-memory messages for the current session.")
+                self.session.clear_messages()
+            print("Cleared messages and context checkpoints for the current session.")
             return True
         if command == "/usage":
             print(self._usage_text())
@@ -139,6 +142,12 @@ class MomoClawCli:
             return True
         if command == "/memory":
             print(self._handle_memory(args))
+            return True
+        if command == "/context":
+            print(self._handle_context(args))
+            return True
+        if command == "/compact":
+            print(self._handle_compact(args))
             return True
         print(f"Unknown command: {command}. Type /help.")
         return True
@@ -222,6 +231,59 @@ class MomoClawCli:
             return f"Rebuilt memory from {count} files; candidate created={'yes' if created else 'no'}."
         return "Unknown memory command. Use /memory for help."
 
+    def _handle_context(self, args: list[str]) -> str:
+        if self.session is None:
+            return "No active session."
+        if not args or args[0] == "status":
+            manager = self.session.context_manager
+            metrics = manager.last_metrics
+            latest = metrics.get("request_estimated_tokens", "n/a")
+            budget = metrics.get("input_budget_tokens", manager.input_budget)
+            actual = metrics.get("actual_input_tokens")
+            actual_text = f"; provider input={actual} tokens" if actual is not None else ""
+            ratio = metrics.get("estimate_ratio")
+            ratio_text = f"; provider/estimate={ratio}" if ratio is not None else ""
+            return (
+                f"Context compaction: {'on' if manager.config.enabled else 'off'}; "
+                f"estimated request={latest}/{budget} tokens{actual_text}{ratio_text}; "
+                f"system_prompt_sha256={manager.system_prompt_sha256[:12]}."
+            )
+        if args == ["on"]:
+            self.context_enabled = True
+            self.session.context_manager.set_enabled(True)
+            return "Automatic context compaction enabled for this session."
+        if args == ["off"]:
+            self.context_enabled = False
+            self.session.context_manager.set_enabled(False)
+            return "Automatic compaction disabled; the hard input budget guard remains active."
+        if args == ["explain"]:
+            return (
+                "Every model request uses the same system prompt. Context summaries, skills, and "
+                "retrieved memory are placed in an untrusted application_context block. "
+                "Old complete turns and oversized tool outputs are compacted in a request-only view; "
+                "the raw session log remains available."
+            )
+        return "Usage: /context status|on|off|explain"
+
+    def _handle_compact(self, args: list[str]) -> str:
+        if self.session is None:
+            return "No active session."
+        if args not in ([], ["preview"]):
+            return "Usage: /compact [preview]"
+        try:
+            metrics = self.session.context_manager.preview(self.session.messages)
+        except Exception as exc:
+            return f"Cannot compact this request: {exc}"
+        summary = (
+            f"Estimated request: {metrics['original_estimated_tokens']} -> "
+            f"{metrics['request_estimated_tokens']} / {metrics['input_budget_tokens']} tokens; "
+            f"old messages summarized={metrics['summarized_messages']}; "
+            f"tool results pruned={metrics['pruned_tool_results']}."
+        )
+        if args == ["preview"]:
+            return summary
+        self.session.context_manager.request_compaction()
+        return summary + " Compaction is scheduled for the next model request."
     def _handle_model(self, args: list[str]) -> str:
         if not args or args[0] in {"current", "show"}:
             return self._model_text(prefix="Current model")
@@ -375,9 +437,11 @@ def help_text() -> str:
             "  /model base-url <url|default> Override or reset base URL for current model.",
             "  /tools                        Show enabled tools.",
             "  /memory <command>             Manage opt-in workspace memory.",
+            "  /context status|on|off         Inspect or control context compaction.",
+            "  /compact [preview]             Preview or schedule context compaction.",
             "  /new                          Start a new session with current model.",
             "  /usage                        Show last model usage.",
-            "  /clear                        Clear current in-memory conversation.",
+            "  /clear                        Clear current messages and context checkpoints.",
             "  /exit                         Exit the CLI.",
         ]
     )
@@ -397,6 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-write", action="store_true", help="Enable non-read-only MVP tools such as bash.")
     parser.add_argument("--skill", dest="skill_names", action="append", default=[], help="Load a workspace skill by name.")
     parser.add_argument("--memory", action="store_true", help="Enable verified workspace memory for this CLI session.")
+    parser.add_argument("--context", action="store_true", help="Enable automatic context compaction for this CLI session.")
     return parser
 
 
@@ -411,6 +476,7 @@ async def async_main(argv: list[str] | None = None) -> None:
         session_id=args.session_id,
         skill_names=args.skill_names,
         memory_enabled=args.memory,
+        context_enabled=args.context,
     )
     await cli.run()
 

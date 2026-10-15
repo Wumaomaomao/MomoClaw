@@ -33,6 +33,7 @@ class AgentOptions:
     reasoning: str | None = None
     session_id: str | None = None
     stream_fn: StreamFn | None = None
+    max_output_tokens: int | None = None
 
 
 @dataclass
@@ -59,6 +60,7 @@ class Agent:
         self._reasoning = options.reasoning
         self._session_id = options.session_id
         self._stream_fn = options.stream_fn
+        self._max_output_tokens = options.max_output_tokens
         self._listeners: list[AgentEventSink] = []
 
     def subscribe(self, listener: AgentEventSink) -> Callable[[], None]:
@@ -122,6 +124,7 @@ class Agent:
             before_tool_call=self._before_tool_call,
             reasoning=self._reasoning,  # type: ignore[arg-type]
             session_id=self._session_id,
+            max_output_tokens=self._max_output_tokens,
         )
 
     async def _emit(self, event: AgentEvent) -> None:

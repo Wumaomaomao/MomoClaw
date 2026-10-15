@@ -34,6 +34,7 @@ class CreateAgentSessionOptions:
     keyword_skill_activation: bool = False
     stream_fn: StreamFn | None = None
     memory_enabled: bool = False
+    context_enabled: bool = False
 
 
 def create_agent_session(options: CreateAgentSessionOptions) -> AgentSession:
@@ -82,5 +83,6 @@ def create_agent_session(options: CreateAgentSessionOptions) -> AgentSession:
             adaptive_skills=options.adaptive_skills,
             keyword_skill_activation=options.keyword_skill_activation,
             memory_enabled=options.memory_enabled,
+            context_enabled=options.context_enabled,
         )
     )

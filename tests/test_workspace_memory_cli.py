@@ -16,6 +16,8 @@ def _model() -> Model:
 def test_memory_flag_is_opt_in(tmp_path: Path) -> None:
     assert build_parser().parse_args(["--workspace", str(tmp_path)]).memory is False
     assert build_parser().parse_args(["--workspace", str(tmp_path), "--memory"]).memory is True
+    assert build_parser().parse_args(["--workspace", str(tmp_path)]).context is False
+    assert build_parser().parse_args(["--workspace", str(tmp_path), "--context"]).context is True
 
     disabled = create_agent_session(CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model()))
     enabled = create_agent_session(CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model(), memory_enabled=True))
@@ -92,15 +94,18 @@ async def test_memory_is_shared_across_sessions_and_injected_only_when_enabled(t
     )
     await enabled.prompt("Where is authentication?")
     assert len(enabled_stream.calls) == 1
-    assert "Retrieved workspace memory" in enabled_stream.calls[0].system_prompt
-    assert "authenticate_user" in enabled_stream.calls[0].system_prompt
+    assert "Retrieved workspace memory" in " ".join(block.text for message in enabled_stream.calls[0].messages if hasattr(message, "content") and isinstance(message.content, list) for block in message.content if isinstance(block, TextContent))
+    assert "authenticate_user" in " ".join(block.text for message in enabled_stream.calls[0].messages if hasattr(message, "content") and isinstance(message.content, list) for block in message.content if isinstance(block, TextContent))
 
     disabled_stream = _reply_stream(response)
     disabled = create_agent_session(
         CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model(), stream_fn=disabled_stream)
     )
     await disabled.prompt("Where is authentication?")
-    assert "Retrieved workspace memory" not in disabled_stream.calls[0].system_prompt
+    assert "Retrieved workspace memory" not in " ".join(block.text for message in disabled_stream.calls[0].messages if hasattr(message, "content") and isinstance(message.content, list) for block in message.content if isinstance(block, TextContent))
+    assert disabled_stream.calls[0].system_prompt == disabled.agent.state.system_prompt
+    assert enabled_stream.calls[0].system_prompt == enabled.agent.state.system_prompt
+    assert disabled_stream.calls[0].system_prompt == disabled.agent.state.system_prompt
     assert enabled.session_id != disabled.session_id
 
 @pytest.mark.asyncio

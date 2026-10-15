@@ -79,6 +79,7 @@ uv run momoclaw --provider openai --model gpt-4.1-mini --base-url https://gatewa
 uv run momoclaw --workspace /path/to/project
 uv run momoclaw --read-write
 uv run momoclaw --memory
+uv run momoclaw --context
 ```
 
 Set the matching API key before sending prompts:
@@ -102,8 +103,10 @@ for the default CLI path.
 - `/tools`: show enabled tools.
 - `/usage`: show last model usage.
 - `/memory`: inspect and manage workspace memory when memory is enabled.
+- `/context`: inspect or enable/disable automatic context compaction.
+- `/compact [preview]`: preview or schedule a request-view compaction.
 - `/new`: start a new session with the current model.
-- `/clear`: clear current in-memory conversation.
+- `/clear`: clear current session messages and context checkpoints.
 - `/exit`: exit.
 
 The CLI stores model configuration, including optional `base_url`, under
@@ -127,6 +130,18 @@ feature does not send project files to a separate indexing service.
 
 See [Workspace Memory documentation](docs/WORKSPACE_MEMORY.md) for commands,
 storage format, scanning limits, and current limitations.
+
+## Context Management
+
+Context management keeps the main system prompt fixed for a session and builds
+an input-budgeted request view before each model call. With `--context`,
+automatic compaction starts above the configured watermark; the hard input
+budget guard is always active. Older complete turns are represented by
+source-linked verbatim excerpts, and oversized tool output is shortened only
+in the request copy. The append-only message log keeps original messages.
+Use `/context status|on|off|explain` and `/compact [preview]` to inspect or
+control it. Token counts use a conservative estimate when no model tokenizer
+is available; see [the implementation plan](docs/CONTEXT_COMPACTION_PLAN.md).
 
 ## Development
 

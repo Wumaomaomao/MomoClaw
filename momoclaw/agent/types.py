@@ -85,6 +85,7 @@ class AgentLoopConfig:
     before_tool_call: BeforeToolCallFn | None = None
     reasoning: ThinkingLevel | None = None
     session_id: str | None = None
+    max_output_tokens: int | None = None
 
 
 class AgentEvent(TypedDict, total=False):

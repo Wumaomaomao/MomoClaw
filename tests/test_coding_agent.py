@@ -137,6 +137,31 @@ async def test_coding_agent_reads_file_through_tool_and_persists(tmp_path: Path)
     assert isinstance(reopened.messages[-1], AssistantMessage)
 
 
+@pytest.mark.asyncio
+async def test_context_output_budget_is_forwarded_to_provider_options(tmp_path: Path) -> None:
+    from momoclaw.ai.types import SimpleStreamOptions
+
+    model = Model(
+        id="fake", name="Fake", api="fake-api", provider="fake", base_url="http://fake",
+        context_window=2048, max_tokens=1024,
+    )
+    received: list[SimpleStreamOptions | None] = []
+    delegate = _stream_from_messages([
+        AssistantMessage(content=[TextContent(text="ok")], api="fake-api", provider="fake", model="fake")
+    ])
+
+    def stream_fn(model, context, options=None):
+        received.append(options)
+        return delegate(model, context, options)
+
+    session = create_agent_session(
+        CreateAgentSessionOptions(workspace_dir=tmp_path, model=model, stream_fn=stream_fn)
+    )
+    await session.prompt("hello")
+
+    assert received[0] is not None
+    assert received[0].max_tokens == 512
+
 def test_factory_defaults_to_read_only_tools(tmp_path: Path) -> None:
     session = create_agent_session(CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model()))
 
@@ -218,7 +243,8 @@ async def test_session_progressively_loads_manual_skill_for_prompt(tmp_path: Pat
     await session.prompt("fix the tests")
 
     assert "Run focused pytest checks before finalizing." not in session.agent.state.system_prompt
-    assert "Run focused pytest checks before finalizing." in stream_fn.calls[0].system_prompt
+    assert "Run focused pytest checks before finalizing." in " ".join(block.text for message in stream_fn.calls[0].messages if hasattr(message, "content") and isinstance(message.content, list) for block in message.content if isinstance(block, TextContent))
+    assert stream_fn.calls[0].system_prompt == session.agent.state.system_prompt
 
 
 @pytest.mark.asyncio
@@ -273,4 +299,5 @@ async def test_keyword_skill_activation_is_opt_in(tmp_path: Path) -> None:
 
     await session.prompt("please review this change")
 
-    assert "Report findings first." in stream_fn.calls[0].system_prompt
+    assert "Report findings first." in " ".join(block.text for message in stream_fn.calls[0].messages if hasattr(message, "content") and isinstance(message.content, list) for block in message.content if isinstance(block, TextContent))
+    assert stream_fn.calls[0].system_prompt == session.agent.state.system_prompt
