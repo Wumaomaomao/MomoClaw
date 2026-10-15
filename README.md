@@ -54,6 +54,7 @@ Model: deepseek/deepseek-v4-pro base_url=https://api.deepseek.com
 
 3. momoclaw.coding_agent — 编码 Agent 应用层
    - 提供编码专用 prompt、工作区工具和会话持久化
+   - 支持可选的本地 Workspace Memory，按来源校验并检索项目事实
    - 内置工具：read、write、edit、bash
 
 4. momoclaw.im — IM 即时通讯桥接层
@@ -77,6 +78,7 @@ uv run momoclaw --provider deepseek --model deepseek-v4-pro
 uv run momoclaw --provider openai --model gpt-4.1-mini --base-url https://gateway.example/v1
 uv run momoclaw --workspace /path/to/project
 uv run momoclaw --read-write
+uv run momoclaw --memory
 ```
 
 Set the matching API key before sending prompts:
@@ -99,6 +101,7 @@ for the default CLI path.
 - `/model base-url <url|default>`: override or reset base URL for the current model.
 - `/tools`: show enabled tools.
 - `/usage`: show last model usage.
+- `/memory`: inspect and manage workspace memory when memory is enabled.
 - `/new`: start a new session with the current model.
 - `/clear`: clear current in-memory conversation.
 - `/exit`: exit.
@@ -110,6 +113,20 @@ The CLI stores model configuration, including optional `base_url`, under
 By default the CLI starts in read-only mode and only exposes the `read` tool.
 Use `--read-write` to enable `write`, `edit`, and `bash`. The CLI prints compact
 tool call/result lines such as `[tool] read README.md` and `[tool:ok] read`.
+
+## Agent Workspace Memory
+
+Workspace Memory is an opt-in, local project knowledge store for facts and
+working practices tied to files in the current workspace. Start the CLI with
+`--memory`, then run `/memory init` to scan supported project files and create
+a candidate overview. Review candidates with `/memory show <id>` and approve
+only the entries you trust with `/memory approve <id>`. Retrieval uses lexical
+matching and includes source paths; entries whose source files change are
+marked stale and excluded. Memory is stored under `.momoclaw/memory/`, and the
+feature does not send project files to a separate indexing service.
+
+See [Workspace Memory documentation](docs/WORKSPACE_MEMORY.md) for commands,
+storage format, scanning limits, and current limitations.
 
 ## Development
 

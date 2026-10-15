@@ -7,7 +7,7 @@ import pytest
 
 from momoclaw.ai.event_stream import AssistantMessageEventStream
 from momoclaw.ai.types import AssistantMessage, Context, Model, SimpleStreamOptions, TextContent, ToolCall, ToolResultMessage
-from momoclaw.coding_agent import CreateAgentSessionOptions, create_agent_session
+from momoclaw.coding_agent import CreateAgentSessionOptions, SkillLoader, create_agent_session
 from momoclaw.coding_agent.builtin_tools import create_builtin_tools
 
 
@@ -140,11 +140,137 @@ async def test_coding_agent_reads_file_through_tool_and_persists(tmp_path: Path)
 def test_factory_defaults_to_read_only_tools(tmp_path: Path) -> None:
     session = create_agent_session(CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model()))
 
-    assert [tool.name for tool in session.agent.state.tools] == ["read"]
+    assert [tool.name for tool in session.agent.state.tools] == ["read", "skill"]
     assert "read-only" in session.agent.state.system_prompt
 
 
 def test_factory_read_write_mode_enables_mutating_tools(tmp_path: Path) -> None:
     session = create_agent_session(CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model(), read_only_mode=False))
 
-    assert [tool.name for tool in session.agent.state.tools] == ["read", "write", "edit", "bash"]
+    assert [tool.name for tool in session.agent.state.tools] == ["read", "write", "edit", "bash", "skill"]
+
+
+def test_skill_loader_loads_workspace_skill_metadata(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "code_review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Review changed code carefully.", encoding="utf-8")
+    (skill_dir / "skill.json").write_text(
+        (
+            '{"name": "code_review", "description": "Review code.", '
+            '"activation": {"manual_names": ["review"], "keywords": ["代码审查"]}, '
+            '"permissions": {"read": true}}'
+        ),
+        encoding="utf-8",
+    )
+
+    skill = SkillLoader(tmp_path).load("code_review")
+
+    assert skill.name == "code_review"
+    assert skill.description == "Review code."
+    assert skill.instructions == "Review changed code carefully."
+    assert skill.activation.manual_names == ["review"]
+    assert skill.activation.keywords == ["代码审查"]
+    assert skill.permissions.read is True
+    assert skill.permissions.write is False
+
+
+def test_skill_loader_rejects_invalid_names(tmp_path: Path) -> None:
+    loader = SkillLoader(tmp_path)
+
+    with pytest.raises(ValueError, match="Invalid skill name"):
+        loader.load("../outside")
+
+
+def test_factory_adds_skill_index_without_elevating_tools(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "pytest_fix"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Run focused pytest checks before finalizing.", encoding="utf-8")
+    (skill_dir / "skill.json").write_text('{"description": "Fix pytest failures."}', encoding="utf-8")
+
+    session = create_agent_session(
+        CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model(), skill_names=["pytest_fix"])
+    )
+
+    assert [tool.name for tool in session.agent.state.tools] == ["read", "skill"]
+    assert "Available skills for adaptive loading:" in session.agent.state.system_prompt
+    assert "- pytest_fix: Fix pytest failures." in session.agent.state.system_prompt
+    assert "Use the skill tool to load full instructions" in session.agent.state.system_prompt
+    assert "Run focused pytest checks before finalizing." not in session.agent.state.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_session_progressively_loads_manual_skill_for_prompt(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "pytest_fix"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Run focused pytest checks before finalizing.", encoding="utf-8")
+    stream_fn = _stream_from_messages(
+        [AssistantMessage(content=[TextContent(text="ok")], api="fake-api", provider="fake", model="fake")]
+    )
+    session = create_agent_session(
+        CreateAgentSessionOptions(
+            workspace_dir=tmp_path,
+            model=_model(),
+            skill_names=["pytest_fix"],
+            stream_fn=stream_fn,
+        )
+    )
+
+    await session.prompt("fix the tests")
+
+    assert "Run focused pytest checks before finalizing." not in session.agent.state.system_prompt
+    assert "Run focused pytest checks before finalizing." in stream_fn.calls[0].system_prompt
+
+
+@pytest.mark.asyncio
+async def test_model_loads_skill_with_skill_tool(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "code_review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Report findings first.", encoding="utf-8")
+    (skill_dir / "skill.json").write_text(
+        '{"description": "Review code changes and report findings first."}',
+        encoding="utf-8",
+    )
+    first = AssistantMessage(
+        content=[ToolCall(id="call_1", name="skill", arguments={"name": "code_review"})],
+        api="fake-api",
+        provider="fake",
+        model="fake",
+        stop_reason="toolUse",
+    )
+    second = AssistantMessage(content=[TextContent(text="reviewed")], api="fake-api", provider="fake", model="fake")
+    stream_fn = _stream_from_messages([first, second])
+    session = create_agent_session(
+        CreateAgentSessionOptions(workspace_dir=tmp_path, model=_model(), stream_fn=stream_fn)
+    )
+
+    new_messages = await session.prompt("please review this change")
+
+    assert isinstance(new_messages[2], ToolResultMessage)
+    assert new_messages[2].tool_name == "skill"
+    assert "Report findings first." in new_messages[2].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_keyword_skill_activation_is_opt_in(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "code_review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Report findings first.", encoding="utf-8")
+    (skill_dir / "skill.json").write_text(
+        '{"activation": {"keywords": ["review", "代码审查"]}}',
+        encoding="utf-8",
+    )
+    stream_fn = _stream_from_messages(
+        [AssistantMessage(content=[TextContent(text="ok")], api="fake-api", provider="fake", model="fake")]
+    )
+    session = create_agent_session(
+        CreateAgentSessionOptions(
+            workspace_dir=tmp_path,
+            model=_model(),
+            stream_fn=stream_fn,
+            keyword_skill_activation=True,
+        )
+    )
+
+    await session.prompt("please review this change")
+
+    assert "Report findings first." in stream_fn.calls[0].system_prompt

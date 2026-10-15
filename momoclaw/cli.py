@@ -11,6 +11,8 @@ from momoclaw.ai.models import get_model, get_models, get_providers
 from momoclaw.ai.types import AssistantMessage, TextContent
 from momoclaw.coding_agent import CreateAgentSessionOptions, create_agent_session
 from momoclaw.coding_agent.session import AgentSession
+from momoclaw.coding_agent.memory import WorkspaceMemoryManager
+from momoclaw.coding_agent.memory.retrieval import render_entry
 
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL_ID = "deepseek-v4-pro"
@@ -34,6 +36,8 @@ class MomoClawCli:
         base_url: str | None = None,
         read_only_mode: bool = True,
         session_id: str | None = None,
+        skill_names: list[str] | None = None,
+        memory_enabled: bool = False,
     ) -> None:
         self.workspace_dir = Path(workspace_dir).resolve()
         self.config_path = self.workspace_dir / ".momoclaw" / "config.json"
@@ -46,6 +50,8 @@ class MomoClawCli:
             self.config.base_url = base_url or None
         self.config.read_only_mode = read_only_mode
         self.session_id = session_id
+        self.skill_names = list(skill_names or [])
+        self.memory_enabled = memory_enabled
         self.session: AgentSession | None = None
         self._printed_stream_text = False
 
@@ -61,6 +67,8 @@ class MomoClawCli:
                 model_id=self.config.model_id,
                 session_id=self.session_id,
                 read_only_mode=self.config.read_only_mode,
+                skill_names=self.skill_names,
+                memory_enabled=self.memory_enabled,
             )
         )
         self.session_id = self.session.session_id
@@ -129,8 +137,90 @@ class MomoClawCli:
         if command == "/tools":
             print(self._tools_text())
             return True
+        if command == "/memory":
+            print(self._handle_memory(args))
+            return True
         print(f"Unknown command: {command}. Type /help.")
         return True
+
+    def _handle_memory(self, args: list[str]) -> str:
+        if not args:
+            return "Usage: /memory status|init|search|list|show|add|approve|refresh|on|off|clear confirm|rebuild confirm"
+        command, *rest = args
+        manager = WorkspaceMemoryManager(self.workspace_dir)
+        if command == "on":
+            self.memory_enabled = True
+            if self.session is not None:
+                self.session.memory_enabled = True
+                self.session.memory_manager = manager
+            return "Workspace memory enabled for this CLI session."
+        if command == "off":
+            self.memory_enabled = False
+            if self.session is not None:
+                self.session.memory_enabled = False
+                self.session.memory_manager = None
+            return "Workspace memory disabled for this CLI session."
+        if command == "init":
+            count, created = manager.initialize()
+            suffix = "created a candidate overview" if created else "overview already exists or no eligible files were found"
+            return f"Scanned {count} files; {suffix}."
+        if command == "status":
+            counts = manager.status()
+            return "Memory: " + ", ".join(f"{key}={value}" for key, value in counts.items()) + f"; enabled={'yes' if self.memory_enabled else 'no'}; budget=1200 tokens."
+        if command == "refresh":
+            checked, stale = manager.refresh()
+            return f"Checked {checked} verified entries; marked {stale} stale."
+        if command == "search":
+            query = " ".join(rest).strip()
+            if not query:
+                return "Usage: /memory search <query>"
+            entries, tokens, stale = manager.search(query)
+            if not entries:
+                return f"No verified memory matched. Stale filtered: {stale}."
+            return f"Estimated {tokens} tokens; stale filtered: {stale}.\n" + "\n".join(render_entry(entry) for entry in entries)
+        if command == "list":
+            status = rest[0] if rest else None
+            if status and status not in {"candidate", "verified", "stale", "rejected"}:
+                return "Status must be candidate, verified, stale, or rejected."
+            entries = manager.list_entries(status)
+            if not entries:
+                return "No memory entries."
+            return "\n".join(f"{entry.id} [{entry.status}] {entry.title}" for entry in entries)
+        if command == "show":
+            if len(rest) != 1:
+                return "Usage: /memory show <id>"
+            entry = manager.get(rest[0])
+            return manager.render(entry) if entry else "Memory entry not found."
+        if command == "add":
+            raw = " ".join(rest)
+            fields = [part.strip() for part in raw.split("|", 3)]
+            if len(fields) != 4:
+                return "Usage: /memory add <source-path> | <title> | <summary> | <body>"
+            try:
+                entry = manager.add_candidate(source_path=fields[0], title=fields[1], summary=fields[2], body=fields[3])
+            except ValueError as exc:
+                return f"Cannot add memory: {exc}"
+            return f"Added candidate {entry.id}; inspect and approve it before retrieval."
+        if command == "approve":
+            if len(rest) != 1:
+                return "Usage: /memory approve <id>"
+            try:
+                entry = manager.approve(rest[0])
+            except ValueError as exc:
+                return f"Cannot approve memory: {exc}"
+            return f"Approved {entry.id}; it can now be retrieved."
+        if command == "clear":
+            if rest != ["confirm"]:
+                return "This deletes the workspace memory index and entries. Run /memory clear confirm to proceed."
+            manager.clear()
+            return "Workspace memory cleared; session history was kept."
+        if command == "rebuild":
+            if rest != ["confirm"]:
+                return "This deletes and recreates the workspace memory index. Run /memory rebuild confirm to proceed."
+            manager.clear()
+            count, created = manager.initialize()
+            return f"Rebuilt memory from {count} files; candidate created={'yes' if created else 'no'}."
+        return "Unknown memory command. Use /memory for help."
 
     def _handle_model(self, args: list[str]) -> str:
         if not args or args[0] in {"current", "show"}:
@@ -284,6 +374,7 @@ def help_text() -> str:
             "                                Save model config and start a new session.",
             "  /model base-url <url|default> Override or reset base URL for current model.",
             "  /tools                        Show enabled tools.",
+            "  /memory <command>             Manage opt-in workspace memory.",
             "  /new                          Start a new session with current model.",
             "  /usage                        Show last model usage.",
             "  /clear                        Clear current in-memory conversation.",
@@ -304,6 +395,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", help="Override the configured model base URL.")
     parser.add_argument("--session", dest="session_id", help="Existing session id to resume.")
     parser.add_argument("--read-write", action="store_true", help="Enable non-read-only MVP tools such as bash.")
+    parser.add_argument("--skill", dest="skill_names", action="append", default=[], help="Load a workspace skill by name.")
+    parser.add_argument("--memory", action="store_true", help="Enable verified workspace memory for this CLI session.")
     return parser
 
 
@@ -316,6 +409,8 @@ async def async_main(argv: list[str] | None = None) -> None:
         base_url=args.base_url,
         read_only_mode=not args.read_write,
         session_id=args.session_id,
+        skill_names=args.skill_names,
+        memory_enabled=args.memory,
     )
     await cli.run()
 

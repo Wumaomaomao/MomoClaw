@@ -69,3 +69,11 @@ session = create_agent_session(
     )
 )
 ```
+
+## Workspace Memory
+
+Workspace memory is opt-in. Pass memory_enabled=True to
+CreateAgentSessionOptions, or start the CLI with --memory. Use /memory init
+to create a candidate workspace overview, inspect it with /memory show, and
+approve it with /memory approve <id> before it can be retrieved. See
+docs/WORKSPACE_MEMORY.md for commands, storage, and safety limits.

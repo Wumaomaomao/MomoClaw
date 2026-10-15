@@ -9,6 +9,9 @@ from momoclaw.agent.types import StreamFn
 from momoclaw.ai.types import AssistantMessage, Message, Model, UserMessage
 
 from .session_store import SessionStore, new_session_id
+from .memory import WorkspaceMemoryManager
+from .skills import Skill, SkillLoader
+from .system_prompt import format_active_skills
 
 
 @dataclass
@@ -21,11 +24,22 @@ class AgentSessionOptions:
     messages: list[Message] = field(default_factory=list)
     reasoning: str | None = None
     stream_fn: StreamFn | None = None
+    skill_names: list[str] = field(default_factory=list)
+    adaptive_skills: bool = True
+    keyword_skill_activation: bool = False
+    memory_enabled: bool = False
 
 
 class AgentSession:
     def __init__(self, options: AgentSessionOptions) -> None:
         self.workspace_dir = Path(options.workspace_dir)
+        self.base_system_prompt = options.system_prompt
+        self.skill_names = list(options.skill_names)
+        self.adaptive_skills = options.adaptive_skills
+        self.keyword_skill_activation = options.keyword_skill_activation
+        self.memory_enabled = options.memory_enabled
+        self.memory_manager = WorkspaceMemoryManager(self.workspace_dir) if self.memory_enabled else None
+        self.skill_loader = SkillLoader(self.workspace_dir)
         self.session_id = options.session_id or new_session_id()
         self.store = SessionStore(self.workspace_dir, self.session_id)
         self.store.ensure_initialized(
@@ -66,12 +80,13 @@ class AgentSession:
         return None
 
     async def prompt(self, text: str) -> list[Message]:
-        new_messages = await self.agent.prompt(text)
+        new_messages = await self._prompt_with_skills(text, lambda: self.agent.prompt(text))
         self.store.append_messages(new_messages)
         return new_messages
 
     async def prompt_message(self, message: UserMessage) -> list[Message]:
-        new_messages = await self.agent.prompt(message)
+        text = message.content if isinstance(message.content, str) else ""
+        new_messages = await self._prompt_with_skills(text, lambda: self.agent.prompt(message))
         self.store.append_messages(new_messages)
         return new_messages
 
@@ -92,10 +107,36 @@ class AgentSession:
     def close(self) -> None:
         self._unsubscribe_agent()
 
+    async def _prompt_with_skills(self, text: str, run_prompt):
+        selected = self._select_skills(text)
+        try:
+            memory_context = self.memory_manager.context_for(text) if self.memory_manager is not None else ""
+        except Exception:
+            memory_context = ""
+        original_prompt = self.agent.state.system_prompt
+        self.agent.state.system_prompt = self._system_prompt_with_skills(selected, memory_context)
+        try:
+            return await run_prompt()
+        finally:
+            self.agent.state.system_prompt = original_prompt
+
+    def _select_skills(self, text: str) -> list[Skill]:
+        if not self.skill_names and not self.keyword_skill_activation:
+            return []
+        prompt_text = text if self.keyword_skill_activation else ""
+        return self.skill_loader.select_for_prompt(prompt_text, manual_names=self.skill_names)
+
+    def _system_prompt_with_skills(self, skills: list[Skill], memory_context: str = "") -> str:
+        parts = [self.base_system_prompt]
+        if skills:
+            parts.append(format_active_skills(skills))
+        if memory_context:
+            parts.append(memory_context)
+        return "\n".join(parts)
+
     async def _on_agent_event(self, event: AgentEvent) -> None:
         self.store.append_event(event)
         for listener in list(self._listeners):
             result = listener(event)
             if hasattr(result, "__await__"):
                 await result  # type: ignore[misc]
-

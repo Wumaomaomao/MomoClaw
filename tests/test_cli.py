@@ -66,6 +66,20 @@ def test_cli_base_url_constructor_override(tmp_path: Path) -> None:
     assert cli.session.agent.state.model.base_url == "https://gateway.example/v1"
 
 
+def test_cli_loads_selected_skills(tmp_path: Path) -> None:
+    skill_dir = tmp_path / ".momoclaw" / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("Report findings first.", encoding="utf-8")
+    cli = MomoClawCli(workspace_dir=tmp_path, skill_names=["review"])
+
+    cli.start_session()
+
+    assert cli.session is not None
+    assert "- review" in cli.session.agent.state.system_prompt
+    assert "Report findings first." not in cli.session.agent.state.system_prompt
+    assert [tool.name for tool in cli.session.agent.state.tools] == ["read", "skill"]
+
+
 def test_cli_formats_tool_events(tmp_path: Path, capsys) -> None:
     cli = MomoClawCli(workspace_dir=tmp_path)
 
